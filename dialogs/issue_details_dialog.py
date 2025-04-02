@@ -5,7 +5,7 @@ class IssueDetailsDialog(QtWidgets.QDialog):
     def __init__(self, parent, redmine, issue, font_size, redmine_url):
         super().__init__(parent)
         self.setWindowTitle(f'Issue #{issue.id}')
-        self.resize(800, 600)
+        self.resize(1080, 600)
 
         layout = QtWidgets.QVBoxLayout()
 

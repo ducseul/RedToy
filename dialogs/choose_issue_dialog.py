@@ -59,6 +59,10 @@ class ChooseIssueDialog(QtWidgets.QDialog):
 
     def populate_table(self, issues):
         self.issues_table.setRowCount(len(issues))
+        self.issues_table.setColumnWidth(0, 50)  # ID
+        self.issues_table.setColumnWidth(1, 700)  # Subject
+        self.issues_table.setColumnWidth(2, 100)  # Status
+        self.issues_table.setColumnWidth(3, 100)  # Priority
         for row, issue in enumerate(issues):
             self.issues_table.setItem(row, 0, QtWidgets.QTableWidgetItem(str(issue.id)))
             self.issues_table.setItem(row, 1, QtWidgets.QTableWidgetItem(issue.subject))

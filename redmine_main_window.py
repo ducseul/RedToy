@@ -1,6 +1,7 @@
 import os
 import configparser
 import webbrowser
+import sys
 
 from PyQt5 import QtWidgets, QtCore, QtGui
 from redminelib import Redmine
@@ -74,8 +75,8 @@ class RedmineMainWindow(QtWidgets.QWidget):
 
     def init_ui(self):
         self.setWindowTitle('Redmine Helper')
-        self.resize(650, 350)
-        self.setMinimumSize(650, 350)
+        self.resize(650, 380)
+        self.setMinimumSize(650, 380)
         layout = QtWidgets.QVBoxLayout()
 
         self.view_button = QtWidgets.QPushButton('1. View current issue details (1)')
@@ -109,10 +110,19 @@ class RedmineMainWindow(QtWidgets.QWidget):
         self.hotkey_label = QtWidgets.QLabel(f'Press {self.hotkey} to toggle this window, Alt+H to hide')
         layout.addWidget(self.hotkey_label)
 
+        button_layout = QtWidgets.QHBoxLayout()
+
         self.hide_button = QtWidgets.QPushButton('Hide Window (Alt+H)')
         self.hide_button.setShortcut('Alt+H')
         self.hide_button.clicked.connect(self.hide_window)
-        layout.addWidget(self.hide_button)
+        button_layout.addWidget(self.hide_button)
+
+        self.quit_button = QtWidgets.QPushButton('Quit (Alt+Q)')
+        self.quit_button.setShortcut('Alt+Q')
+        self.quit_button.clicked.connect(self.quit)
+        button_layout.addWidget(self.quit_button)
+
+        layout.addLayout(button_layout)
 
         QtWidgets.QShortcut(QtGui.QKeySequence("Escape"), self, self.hide_window)
 
@@ -121,6 +131,9 @@ class RedmineMainWindow(QtWidgets.QWidget):
     def hide_window(self):
         self.manually_hidden = True
         self.hide()
+
+    def quit(self):
+        sys.exit(self)
 
     def closeEvent(self, event):
         event.ignore()
