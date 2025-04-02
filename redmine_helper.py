@@ -14,6 +14,16 @@ class RedmineHelperService:
         self.app = QtWidgets.QApplication(sys.argv)
         self.helper = RedmineHelper()
 
+        # Use a lower frequency timer to reduce CPU usage
+        # 500ms is enough for hotkey responsiveness without causing lag
+        self.timer = QtCore.QTimer()
+        self.timer.timeout.connect(self.process_events)
+        self.timer.start(500)
+
+    def process_events(self):
+        # Process pending events but avoid excessive CPU usage
+        QtWidgets.QApplication.processEvents()
+
     def run(self):
         # Run the application without showing the UI initially
         # It will show up when the hotkey is pressed
@@ -31,9 +41,16 @@ class RedmineHelper(QtWidgets.QWidget):
         self.load_config()
         self.init_redmine()
         self.init_ui()
-        self.register_hotkey()
         self.apply_font_size()
+
+        # Set window flags to stay on top but allow normal window behavior
         self.setWindowFlags(QtCore.Qt.WindowStaysOnTopHint)
+
+        # Use a single-shot timer to register the hotkey after the app is fully initialized
+        QtCore.QTimer.singleShot(1000, self.register_hotkey)
+
+        # Create a flag to track visibility state
+        self.manually_hidden = False
 
     def load_config(self):
         """Load configuration from config file"""
@@ -108,29 +125,35 @@ class RedmineHelper(QtWidgets.QWidget):
     def init_ui(self):
         """Initialize user interface"""
         self.setWindowTitle('Redmine Helper')
-        self.resize(450, 350)
+        self.resize(650, 350)
+        # Set a minimum size to prevent UI glitches
+        self.setMinimumSize(650, 350)
 
         layout = QtWidgets.QVBoxLayout()
 
         # Option 1: View issue details
-        self.view_button = QtWidgets.QPushButton('1. View current issue details')
+        self.view_button = QtWidgets.QPushButton('1. View current issue details (1)')
+        self.view_button.setShortcut('1')
         self.view_button.clicked.connect(self.view_issue_details)
         self.view_button.setEnabled(self.current_issue is not None)
         layout.addWidget(self.view_button)
 
         # Option 2: Change issue status
-        self.status_button = QtWidgets.QPushButton('2. Change issue status')
+        self.status_button = QtWidgets.QPushButton('2. Change issue status (2)')
+        self.status_button.setShortcut('2')
         self.status_button.clicked.connect(self.change_issue_status)
         self.status_button.setEnabled(self.current_issue is not None)
         layout.addWidget(self.status_button)
 
         # Option 3: Choose issue to work on
-        self.choose_button = QtWidgets.QPushButton('3. Choose issue to work on')
+        self.choose_button = QtWidgets.QPushButton('3. Choose issue to work on (3)')
+        self.choose_button.setShortcut('3')
         self.choose_button.clicked.connect(self.choose_issue)
         layout.addWidget(self.choose_button)
 
         # Option 4: Settings
-        self.settings_button = QtWidgets.QPushButton('4. Settings')
+        self.settings_button = QtWidgets.QPushButton('4. Settings (4)')
+        self.settings_button.setShortcut('4')
         self.settings_button.clicked.connect(self.show_settings)
         layout.addWidget(self.settings_button)
 
@@ -146,7 +169,34 @@ class RedmineHelper(QtWidgets.QWidget):
             self.issue_label.setText(f'Working on #{self.current_issue.id}: {self.current_issue.subject}')
         layout.addWidget(self.issue_label)
 
+        # Add keyboard shortcut info
+        self.hotkey_label = QtWidgets.QLabel(f'Press {self.hotkey} to toggle this window, Alt+H to hide')
+        layout.addWidget(self.hotkey_label)
+
+        # Add a hide button with shortcut
+        self.hide_button = QtWidgets.QPushButton('Hide Window (Alt+H)')
+        self.hide_button.setShortcut('Alt+H')
+        self.hide_button.clicked.connect(self.hide_window)
+        layout.addWidget(self.hide_button)
+
         self.setLayout(layout)
+
+        # Add global shortcuts for the entire window
+        QtWidgets.QShortcut(QtGui.QKeySequence("Escape"), self, self.hide_window)
+
+    def hide_window(self):
+        """Hide the window when button is clicked"""
+        self.manually_hidden = True
+        self.hide()
+        print("Window hidden - press hotkey to show")
+
+    def closeEvent(self, event):
+        """Override close event to hide instead of close"""
+        # Hide the window instead of closing it
+        event.ignore()
+        self.manually_hidden = True
+        self.hide()
+        print("Window hidden on close - press hotkey to show")
 
     def apply_font_size(self):
         """Apply the configured font size to the application"""
@@ -159,15 +209,41 @@ class RedmineHelper(QtWidgets.QWidget):
     def register_hotkey(self):
         """Register global hotkey for showing the application"""
         try:
-            keyboard.add_hotkey(self.hotkey, self.show_app)
+            # First try to unregister any existing hotkey
+            try:
+                keyboard.remove_all_hotkeys()
+            except:
+                pass
+
+            # Register the new hotkey with a direct reference to toggle_window
+            keyboard.add_hotkey(self.hotkey, self.toggle_window)
             print(f"Hotkey registered: {self.hotkey}")
+
+            # Update the label
+            if hasattr(self, 'hotkey_label'):
+                self.hotkey_label.setText(f'Press {self.hotkey} to toggle this window, Alt+H to hide')
+
         except Exception as e:
             print(f"Failed to register hotkey: {str(e)}")
+            QtWidgets.QMessageBox.warning(
+                self, 'Hotkey Error',
+                f"Failed to register hotkey: {str(e)}\n\nTry running the application as administrator."
+            )
 
-    def show_app(self):
-        """Show the application when hotkey is pressed"""
-        self.show()
-        self.activateWindow()
+    def toggle_window(self):
+        """Toggle window visibility when hotkey is pressed"""
+        print("Hotkey pressed - toggling visibility")
+
+        if self.isVisible():
+            print("Window is visible - hiding")
+            self.manually_hidden = True
+            self.hide()
+        else:
+            print("Window is hidden - showing")
+            self.manually_hidden = False
+            self.show()
+            self.raise_()  # Bring window to front
+            self.activateWindow()  # Set as active window
 
     def show_settings(self):
         """Show settings dialog"""
@@ -179,7 +255,7 @@ class RedmineHelper(QtWidgets.QWidget):
 
         # Font size settings
         font_layout = QtWidgets.QHBoxLayout()
-        font_layout.addWidget(QtWidgets.QLabel('Font Size:'))
+        font_layout.addWidget(QtWidgets.QLabel('Font Size (Alt+F):'))
 
         font_spin = QtWidgets.QSpinBox()
         font_spin.setMinimum(8)
@@ -191,12 +267,18 @@ class RedmineHelper(QtWidgets.QWidget):
 
         # Hotkey settings
         hotkey_layout = QtWidgets.QHBoxLayout()
-        hotkey_layout.addWidget(QtWidgets.QLabel('Hotkey:'))
+        hotkey_layout.addWidget(QtWidgets.QLabel('Hotkey (Alt+K):'))
 
         hotkey_edit = QtWidgets.QLineEdit(self.hotkey)
         hotkey_layout.addWidget(hotkey_edit)
 
         layout.addLayout(hotkey_layout)
+
+        # Test hotkey button
+        test_button = QtWidgets.QPushButton('Test Hotkey (Alt+T)')
+        test_button.setShortcut('Alt+T')
+        test_button.clicked.connect(lambda: self.test_hotkey(hotkey_edit.text()))
+        layout.addWidget(test_button)
 
         # Preview label
         preview_label = QtWidgets.QLabel('This is a font size preview')
@@ -216,8 +298,31 @@ class RedmineHelper(QtWidgets.QWidget):
         button_box.rejected.connect(dialog.reject)
         layout.addWidget(button_box)
 
+        # Set keyboard shortcuts for the dialog
+        QtWidgets.QShortcut(QtGui.QKeySequence("Alt+F"), dialog, font_spin.setFocus)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Alt+K"), dialog, hotkey_edit.setFocus)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Alt+S"), dialog, dialog.accept)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Escape"), dialog, dialog.reject)
+
         dialog.setLayout(layout)
         dialog.exec_()
+
+    def test_hotkey(self, hotkey):
+        """Test if a hotkey can be registered"""
+        try:
+            # Try to register the hotkey temporarily
+            temp_fn = lambda: print("Test hotkey pressed")
+            keyboard.add_hotkey(hotkey, temp_fn)
+            QtWidgets.QMessageBox.information(
+                self, 'Hotkey Test',
+                f"Hotkey '{hotkey}' registered successfully!\n\nPress OK to remove the test hotkey."
+            )
+            keyboard.remove_hotkey(hotkey)
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(
+                self, 'Hotkey Test Failed',
+                f"Failed to register hotkey: {str(e)}\n\nTry another key combination."
+            )
 
     def update_preview(self, label, size):
         """Update the font size preview"""
@@ -227,11 +332,9 @@ class RedmineHelper(QtWidgets.QWidget):
 
     def save_settings(self, font_size, hotkey, dialog):
         """Save settings and apply changes"""
-        # Remember old hotkey for unregistering
-        old_hotkey = self.hotkey
-
         # Update settings
         self.font_size = font_size
+        old_hotkey = self.hotkey
         self.hotkey = hotkey
 
         # Apply font size
@@ -240,16 +343,15 @@ class RedmineHelper(QtWidgets.QWidget):
         # Update hotkey if it changed
         if old_hotkey != self.hotkey:
             try:
-                keyboard.remove_hotkey(old_hotkey)
-                keyboard.add_hotkey(self.hotkey, self.show_app)
-                print(f"Hotkey updated: {self.hotkey}")
+                # Register the new hotkey
+                self.register_hotkey()
             except Exception as e:
                 QtWidgets.QMessageBox.warning(
                     self, 'Hotkey Error',
                     f"Failed to register new hotkey: {str(e)}\nReverting to previous hotkey."
                 )
                 self.hotkey = old_hotkey
-                keyboard.add_hotkey(self.hotkey, self.show_app)
+                self.register_hotkey()
 
         # Save to config file
         self.save_config()
@@ -280,7 +382,7 @@ Description:
 
             dialog = QtWidgets.QDialog(self)
             dialog.setWindowTitle(f'Issue #{issue.id}')
-            dialog.resize(500, 400)
+            dialog.resize(800, 600)
 
             layout = QtWidgets.QVBoxLayout()
 
@@ -295,15 +397,24 @@ Description:
 
             layout.addWidget(text_edit)
 
-            web_button = QtWidgets.QPushButton('Open in browser')
+            button_layout = QtWidgets.QHBoxLayout()
+
+            web_button = QtWidgets.QPushButton('Open in browser (Alt+B)')
+            web_button.setShortcut('Alt+B')
             web_button.clicked.connect(lambda: webbrowser.open(f"{self.redmine_url}/issues/{issue.id}"))
-            layout.addWidget(web_button)
+            button_layout.addWidget(web_button)
 
-            close_button = QtWidgets.QPushButton('Close')
+            close_button = QtWidgets.QPushButton('Close (Esc)')
+            close_button.setShortcut('Esc')
             close_button.clicked.connect(dialog.accept)
-            layout.addWidget(close_button)
+            button_layout.addWidget(close_button)
 
+            layout.addLayout(button_layout)
             dialog.setLayout(layout)
+
+            # Additional keyboard shortcuts
+            QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+W"), dialog, dialog.accept)
+
             dialog.exec_()
 
         except Exception as e:
@@ -331,7 +442,7 @@ Description:
             layout = QtWidgets.QVBoxLayout()
 
             layout.addWidget(QtWidgets.QLabel(f'Current status: {issue.status.name}'))
-            layout.addWidget(QtWidgets.QLabel('Select new status:'))
+            layout.addWidget(QtWidgets.QLabel('Select new status (Alt+S to focus):'))
 
             status_combo = QtWidgets.QComboBox()
             for status in status_list:
@@ -342,11 +453,23 @@ Description:
             button_box = QtWidgets.QDialogButtonBox(
                 QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
             )
+            ok_button = button_box.button(QtWidgets.QDialogButtonBox.Ok)
+            cancel_button = button_box.button(QtWidgets.QDialogButtonBox.Cancel)
+
+            ok_button.setText("Save (Alt+Enter)")
+            ok_button.setShortcut("Alt+Return")
+            cancel_button.setText("Cancel (Esc)")
+            cancel_button.setShortcut("Esc")
+
             button_box.accepted.connect(dialog.accept)
             button_box.rejected.connect(dialog.reject)
             layout.addWidget(button_box)
 
             dialog.setLayout(layout)
+
+            # Additional shortcuts
+            QtWidgets.QShortcut(QtGui.QKeySequence("Alt+S"), dialog, status_combo.setFocus)
+            QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+S"), dialog, dialog.accept)
 
             if dialog.exec_() == QtWidgets.QDialog.Accepted:
                 if status_combo.currentIndex() >= 0:
@@ -379,6 +502,14 @@ Description:
 
             layout = QtWidgets.QVBoxLayout()
 
+            # Add search filter
+            search_layout = QtWidgets.QHBoxLayout()
+            search_layout.addWidget(QtWidgets.QLabel("Search (Alt+F):"))
+            search_edit = QtWidgets.QLineEdit()
+            search_edit.setPlaceholderText("Filter issues by ID or subject...")
+            search_layout.addWidget(search_edit)
+            layout.addLayout(search_layout)
+
             issues_table = QtWidgets.QTableWidget()
             issues_table.setColumnCount(4)
             issues_table.setHorizontalHeaderLabels(['ID', 'Subject', 'Status', 'Priority'])
@@ -396,6 +527,9 @@ Description:
             font.setPointSize(self.font_size)
             issues_table.setFont(font)
 
+            # Store all issues for filtering
+            self.all_issues = []
+
             row = 0
             issues_table.setRowCount(len(issues))
             for issue in issues:
@@ -403,30 +537,72 @@ Description:
                 issues_table.setItem(row, 1, QtWidgets.QTableWidgetItem(issue.subject))
                 issues_table.setItem(row, 2, QtWidgets.QTableWidgetItem(issue.status.name))
                 issues_table.setItem(row, 3, QtWidgets.QTableWidgetItem(issue.priority.name))
+                self.all_issues.append(issue)
                 row += 1
+
+            # Connect search filter
+            search_edit.textChanged.connect(lambda text: self.filter_issues(text, issues_table, issues))
 
             layout.addWidget(issues_table)
 
             button_layout = QtWidgets.QHBoxLayout()
 
-            select_button = QtWidgets.QPushButton('Select as current')
+            select_button = QtWidgets.QPushButton('Select as current (Alt+S)')
+            select_button.setShortcut('Alt+S')
             select_button.clicked.connect(lambda: self.select_issue(issues_table, issues, dialog))
             button_layout.addWidget(select_button)
 
-            open_button = QtWidgets.QPushButton('Open in browser')
+            open_button = QtWidgets.QPushButton('Open in browser (Alt+B)')
+            open_button.setShortcut('Alt+B')
             open_button.clicked.connect(lambda: self.open_issue_in_browser(issues_table, issues))
             button_layout.addWidget(open_button)
 
-            cancel_button = QtWidgets.QPushButton('Cancel')
+            cancel_button = QtWidgets.QPushButton('Cancel (Esc)')
+            cancel_button.setShortcut('Esc')
             cancel_button.clicked.connect(dialog.reject)
             button_layout.addWidget(cancel_button)
 
             layout.addLayout(button_layout)
             dialog.setLayout(layout)
+
+            # Add more keyboard shortcuts
+            QtWidgets.QShortcut(QtGui.QKeySequence("Alt+F"), dialog, search_edit.setFocus)
+            QtWidgets.QShortcut(QtGui.QKeySequence("Return"), issues_table,
+                                lambda: self.select_issue(issues_table, issues, dialog))
+            QtWidgets.QShortcut(QtGui.QKeySequence("Escape"), dialog, dialog.reject)
+
+            # Double click to select
+            issues_table.cellDoubleClicked.connect(
+                lambda row, col: self.select_issue(issues_table, issues, dialog))
+
             dialog.exec_()
 
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'Failed to get issues: {str(e)}')
+
+    def filter_issues(self, text, table, issues):
+        """Filter issues in the table by text"""
+        text = text.lower()
+
+        # Clear the table
+        table.setRowCount(0)
+
+        # Find matching issues
+        filtered_issues = []
+        for issue in issues:
+            if (text in str(issue.id).lower() or
+                    text in issue.subject.lower() or
+                    text in issue.status.name.lower() or
+                    text in issue.priority.name.lower()):
+                filtered_issues.append(issue)
+
+        # Repopulate the table
+        table.setRowCount(len(filtered_issues))
+        for row, issue in enumerate(filtered_issues):
+            table.setItem(row, 0, QtWidgets.QTableWidgetItem(str(issue.id)))
+            table.setItem(row, 1, QtWidgets.QTableWidgetItem(issue.subject))
+            table.setItem(row, 2, QtWidgets.QTableWidgetItem(issue.status.name))
+            table.setItem(row, 3, QtWidgets.QTableWidgetItem(issue.priority.name))
 
     def select_issue(self, table, issues, dialog):
         """Select an issue as current from the table"""
