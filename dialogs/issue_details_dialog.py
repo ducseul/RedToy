@@ -8,9 +8,10 @@ import subprocess
 
 class IssueDetailsDialog(QtWidgets.QDialog):
     def __init__(self, parent, redmine, issue, font_size, redmine_url, api_key):
-        super().__init__(parent)
+        super().__init__(parent, QtCore.Qt.FramelessWindowHint)
+        self.setWindowFlags(QtCore.Qt.FramelessWindowHint | QtCore.Qt.Window)
         self.setWindowTitle(f'Issue #{issue.id}')
-        self.resize(1080, 600)
+        self.resize(1080, 620)
         self.redmine = redmine
         self.issue_id = issue.id
         self.redmine_url = redmine_url
@@ -47,25 +48,74 @@ class IssueDetailsDialog(QtWidgets.QDialog):
         details_tab.setLayout(details_layout)
 
         # Issue details
-        details = f"""
-Issue #{self.issue.id}: {self.issue.subject}
-Status: {self.issue.status.name}
-Priority: {self.issue.priority.name}
-Assigned to: {getattr(self.issue, 'assigned_to', 'Unassigned')}
-Created: {self.issue.created_on}
-Updated: {self.issue.updated_on}
+        info_layout = QtWidgets.QGridLayout()
 
-Description:
-{self.issue.description}
-        """
+        def make_labeled_value(label, value, bold=True, font_size_offset=0):
+            text = f"<b>{label}</b> {value}" if bold else f"{label} {value}"
+            lbl = QtWidgets.QLabel(text)
+            font = lbl.font()
+            font.setPointSize(self.font_size + font_size_offset)
+            lbl.setFont(font)
+            return lbl
 
-        text_edit = QtWidgets.QTextEdit()
-        text_edit.setReadOnly(True)
-        text_edit.setPlainText(details)
-        font = text_edit.font()
+        # Custom clickable QLabel
+        class ClickableLabel(QtWidgets.QLabel):
+            clicked = QtCore.pyqtSignal()
+
+            def mouseReleaseEvent(self, event):
+                if event.button() == QtCore.Qt.LeftButton:
+                    self.clicked.emit()
+
+        # Row 0: Issue title (clickable)
+        title_label = ClickableLabel(f"<b>Issue #{self.issue.id}:</b> {self.issue.subject}")
+        title_label.setTextFormat(QtCore.Qt.RichText)
+        font = title_label.font()
         font.setPointSize(self.font_size)
-        text_edit.setFont(font)
-        details_layout.addWidget(text_edit)
+        title_label.setFont(font)
+
+        title_wrapper = QtWidgets.QWidget()
+        title_layout = QtWidgets.QVBoxLayout(title_wrapper)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.addWidget(title_label)
+
+        # Row 1: Status + Priority
+        self.row1_widget = QtWidgets.QWidget()
+        row1_layout = QtWidgets.QHBoxLayout(self.row1_widget)
+        row1_layout.setContentsMargins(0, 0, 0, 0)
+        row1_layout.addWidget(make_labeled_value("Status:", self.issue.status.name, font_size_offset=-1))
+        row1_layout.addWidget(make_labeled_value("Priority:", self.issue.priority.name, font_size_offset=-1))
+        self.row1_widget.setVisible(False)
+
+        # Row 2: Created + Updated
+        self.row2_widget = QtWidgets.QWidget()
+        row2_layout = QtWidgets.QHBoxLayout(self.row2_widget)
+        row2_layout.setContentsMargins(0, 0, 0, 0)
+        row2_layout.addWidget(make_labeled_value("Created:", self.issue.created_on, font_size_offset=-1))
+        row2_layout.addWidget(make_labeled_value("Updated:", self.issue.updated_on, font_size_offset=-1))
+        self.row2_widget.setVisible(False)
+
+        # Toggle rows on click
+        def toggle_rows():
+            visible = not self.row1_widget.isVisible()
+            self.row1_widget.setVisible(visible)
+            self.row2_widget.setVisible(visible)
+
+        title_label.clicked.connect(toggle_rows)
+
+        info_layout.addWidget(title_wrapper, 0, 0, 1, 2)
+        info_layout.addWidget(self.row1_widget, 1, 0, 1, 2)
+        info_layout.addWidget(self.row2_widget, 2, 0, 1, 2)
+
+        # Row 3: Description
+        desc_text = QtWidgets.QTextEdit()
+        desc_text.setReadOnly(True)
+        desc_text.setPlainText(self.issue.description)
+        font = desc_text.font()
+        font.setPointSize(self.font_size)
+        desc_text.setFont(font)
+
+        details_layout.addLayout(info_layout)
+        details_layout.addWidget(desc_text)
 
         # Notes/journals tab
         notes_tab = QtWidgets.QWidget()
@@ -95,14 +145,10 @@ Description:
                     for detail in journal.details:
                         if detail.get('name') == 'status_id':
                             try:
-                                # Convert string status IDs to integers before lookup
-                                old_status_id = int(detail.get('old_value', '0'))
-                                new_status_id = int(detail.get('new_value', '0'))
-
-                                # Use the converted integers to look up status names
-                                old_status = self.statuses.get(old_status_id, f"Status #{old_status_id}")
-                                new_status = self.statuses.get(new_status_id, f"Status #{new_status_id}")
-
+                                old_status = self.statuses.get(int(detail.get('old_value', '0')),
+                                                               f"Status #{detail.get('old_value')}")
+                                new_status = self.statuses.get(int(detail.get('new_value', '0')),
+                                                               f"Status #{detail.get('new_value')}")
                                 header_text += f" - Status: {old_status} → {new_status}"
                             except (ValueError, TypeError):
                                 # Fallback if conversion fails
@@ -130,12 +176,12 @@ Description:
                     note_layout.addWidget(notes_label)
 
                 # Display other changes (not status which is already in the header)
-                changes_added = False
                 if hasattr(journal, 'details') and journal.details:
+                    changes_added = False
                     changes_layout = QtWidgets.QVBoxLayout()
 
                     for detail in journal.details:
-                        if detail.get('name') != 'status_id':  # Skip status changes as they're in the header
+                        if detail.get('name') != 'status_id':
                             if not changes_added:
                                 changes = QtWidgets.QLabel("<b>Changes:</b>")
                                 changes_layout.addWidget(changes)
@@ -234,6 +280,16 @@ Description:
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+W"), self, self.accept)
 
         self.setLayout(main_layout)
+
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton:
+            self._drag_pos = event.globalPos() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == QtCore.Qt.LeftButton:
+            self.move(event.globalPos() - self._drag_pos)
+            event.accept()
 
     def format_size(self, size_bytes):
         # Format file size in human-readable format
