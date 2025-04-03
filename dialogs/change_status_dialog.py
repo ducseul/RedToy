@@ -16,12 +16,21 @@ class ChangeStatusDialog(QtWidgets.QDialog):
         self.status_combo = QtWidgets.QComboBox()
         self.status_map = {}
 
-        for status in redmine.issue_status.all():
-            if status.id != self.issue.status.id:
-                self.status_combo.addItem(status.name, status.id)
-                self.status_map[status.name] = status.id
+        current_index = 0
+        for i, status in enumerate(redmine.issue_status.all()):
+            self.status_combo.addItem(status.name, status.id)
+            self.status_map[status.name] = status.id
+            if status.id == self.issue.status.id:
+                current_index = i  # save index to set as current later
+
+        self.status_combo.setCurrentIndex(current_index)
 
         layout.addWidget(self.status_combo)
+
+        layout.addWidget(QtWidgets.QLabel('Add a note (optional):'))
+        self.note_edit = QtWidgets.QTextEdit()
+        self.note_edit.setPlaceholderText("Enter note here...")
+        layout.addWidget(self.note_edit)
 
         button_box = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.save_status)
@@ -35,8 +44,13 @@ class ChangeStatusDialog(QtWidgets.QDialog):
 
     def save_status(self):
         selected_id = self.status_combo.currentData()
+        note = self.note_edit.toPlainText().strip()
         if selected_id:
-            self.redmine.issue.update(self.issue.id, status_id=selected_id)
+            update_data = {'status_id': selected_id}
+            if note:
+                update_data['notes'] = note
+            self.redmine.issue.update(self.issue.id, **update_data)
             self.updated_issue = self.redmine.issue.get(self.issue.id)
-            QtWidgets.QMessageBox.information(self, 'Status Updated', f'Status updated to {self.updated_issue.status.name}')
+            QtWidgets.QMessageBox.information(self, 'Status Updated',
+                                              f"Status updated to {self.updated_issue.status.name}")
             self.accept()
