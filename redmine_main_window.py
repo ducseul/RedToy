@@ -225,7 +225,7 @@ class RedmineMainWindow(QtWidgets.QWidget):
             self.issue_label.setText(f'Working on #{self.current_issue.id}: {self.current_issue.subject}')
 
     def choose_issue(self):
-        dialog = ChooseIssueDialog(self, self.redmine, self.font_size, self.redmine_url)
+        dialog = ChooseIssueDialog(self, self.redmine, self.font_size, self.redmine_url, self.api_key)
         if dialog.exec_():
             self.current_issue = dialog.selected_issue
             self.issue_label.setText(f'Working on #{self.current_issue.id}: {self.current_issue.subject}')
