@@ -16,7 +16,12 @@ from dialogs.choose_issue_dialog import ChooseIssueDialog
 class RedmineMainWindow(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
-        self.config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.cfg')
+        if getattr(sys, 'frozen', False):  # Check if running as a compiled executable
+            base_path = os.path.dirname(sys.executable)
+        else:  # Running as a script
+            base_path = os.path.dirname(os.path.abspath(__file__))
+
+        self.config_file = 'config.cfg'
         self.current_issue = None
         self.redmine = None
         self.hotkey = None
@@ -28,6 +33,25 @@ class RedmineMainWindow(QtWidgets.QWidget):
         self.setWindowFlags(QtCore.Qt.WindowStaysOnTopHint)
         QtCore.QTimer.singleShot(1000, self.register_hotkey)
         self.manually_hidden = False
+
+        self.tray_icon = QtWidgets.QSystemTrayIcon(self)
+        icon = QtGui.QIcon("icon.ico")  # Path to a valid .png or .ico file
+        self.tray_icon.setIcon(icon)
+
+        tray_menu = QtWidgets.QMenu()
+        show_action = tray_menu.addAction("Show/Hide")
+        show_action.triggered.connect(self.toggle_window)
+
+        quit_action = tray_menu.addAction("Quit")
+        quit_action.triggered.connect(QtWidgets.qApp.quit)
+
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.activated.connect(self.on_tray_icon_activated)
+        self.tray_icon.show()
+
+    def on_tray_icon_activated(self, reason):
+        if reason == QtWidgets.QSystemTrayIcon.Trigger:  # single click
+            self.toggle_window()
 
     def load_config(self):
         config = configparser.ConfigParser()
