@@ -7,18 +7,31 @@ import subprocess
 
 
 class IssueDetailsDialog(QtWidgets.QDialog):
-    def __init__(self, parent, redmine, issue, font_size, redmine_url):
+    def __init__(self, parent, redmine, issue, font_size, redmine_url, api_key):
         super().__init__(parent)
         self.setWindowTitle(f'Issue #{issue.id}')
         self.resize(1080, 600)
         self.redmine = redmine
         self.issue_id = issue.id
         self.redmine_url = redmine_url
+        self.api_key = api_key
         self.font_size = font_size
         self.temp_files = []  # Track temporary files for cleanup
 
         # Get the full issue details
-        self.issue = redmine.issue.get(issue.id, include=['attachments', 'journals'])
+        self.issue = redmine.issue.get(issue.id, include=['attachments', 'journals', 'status'])
+
+        # Try to get all statuses to show names instead of IDs
+        self.statuses = {}
+        try:
+            # Try the issue_status endpoint instead of status
+            for status in redmine.issue_status.all():
+                self.statuses[status.id] = status.name
+        except Exception as e:
+            print(f"Failed to retrieve statuses: {e}")
+            # If we can't get statuses, try to at least get the current issue's status
+            if hasattr(self.issue, 'status'):
+                self.statuses[self.issue.status.id] = self.issue.status.name
 
         self.setup_ui()
 
@@ -67,37 +80,73 @@ Description:
 
         # Add each journal/note
         if hasattr(self.issue, 'journals'):
-            for journal in self.issue.journals:
+            for journal in reversed(self.issue.journals):
                 note_frame = QtWidgets.QFrame()
                 note_frame.setFrameShape(QtWidgets.QFrame.StyledPanel)
                 note_frame.setFrameShadow(QtWidgets.QFrame.Raised)
                 note_layout = QtWidgets.QVBoxLayout()
 
-                # Header with author and date
+                # Header with author, date, and status change if present
                 author = getattr(journal, 'user', 'Unknown')
-                header = QtWidgets.QLabel(f"<b>{author}</b> - {journal.created_on}")
+                header_text = f"<b>{author}</b> - {journal.created_on}"
+
+                # Add status change info directly in the header if present
+                if hasattr(journal, 'details') and journal.details:
+                    for detail in journal.details:
+                        if detail.get('name') == 'status_id':
+                            try:
+                                # Convert string status IDs to integers before lookup
+                                old_status_id = int(detail.get('old_value', '0'))
+                                new_status_id = int(detail.get('new_value', '0'))
+
+                                # Use the converted integers to look up status names
+                                old_status = self.statuses.get(old_status_id, f"Status #{old_status_id}")
+                                new_status = self.statuses.get(new_status_id, f"Status #{new_status_id}")
+
+                                header_text += f" - Status: {old_status} → {new_status}"
+                            except (ValueError, TypeError):
+                                # Fallback if conversion fails
+                                header_text += f" - Status: {detail.get('old_value', 'Unknown')} → {detail.get('new_value', 'Unknown')}"
+                            break
+
+                header = QtWidgets.QLabel(header_text)
                 note_layout.addWidget(header)
 
-                # Note content
+                # Note content as italic text without scrollbars
                 if hasattr(journal, 'notes') and journal.notes:
-                    content = QtWidgets.QTextEdit()
-                    content.setReadOnly(True)
-                    content.setPlainText(journal.notes)
-                    font = content.font()
-                    font.setPointSize(self.font_size)
-                    content.setFont(font)
-                    content.setMaximumHeight(200)
-                    note_layout.addWidget(content)
+                    notes_label = QtWidgets.QLabel()
 
-                # Changes
+                    # Format the text with italics and preserve line breaks
+                    formatted_notes = journal.notes.replace('\n', '<br>')
+                    notes_label.setText(f"<i>{formatted_notes}</i>")
+                    notes_label.setWordWrap(True)
+                    notes_label.setTextFormat(QtCore.Qt.RichText)
+
+                    # Set the font size
+                    font = notes_label.font()
+                    font.setPointSize(self.font_size)
+                    notes_label.setFont(font)
+
+                    note_layout.addWidget(notes_label)
+
+                # Display other changes (not status which is already in the header)
+                changes_added = False
                 if hasattr(journal, 'details') and journal.details:
-                    changes = QtWidgets.QLabel("<b>Changes:</b>")
-                    note_layout.addWidget(changes)
+                    changes_layout = QtWidgets.QVBoxLayout()
+
                     for detail in journal.details:
-                        # Handle detail as dictionary instead of object
-                        change_text = f"• {detail.get('name', 'Unknown')}: {detail.get('old_value', '')} → {detail.get('new_value', '')}"
-                        change = QtWidgets.QLabel(change_text)
-                        note_layout.addWidget(change)
+                        if detail.get('name') != 'status_id':  # Skip status changes as they're in the header
+                            if not changes_added:
+                                changes = QtWidgets.QLabel("<b>Changes:</b>")
+                                changes_layout.addWidget(changes)
+                                changes_added = True
+
+                            change_text = f"• {detail.get('name', 'Unknown')}: {detail.get('old_value', '')} → {detail.get('new_value', '')}"
+                            change = QtWidgets.QLabel(change_text)
+                            changes_layout.addWidget(change)
+
+                    if changes_added:
+                        note_layout.addLayout(changes_layout)
 
                 note_frame.setLayout(note_layout)
                 notes_content_layout.addWidget(note_frame)
@@ -197,14 +246,23 @@ Description:
     def view_attachment(self, attachment):
         # Download and open the attachment
         try:
-            # Create the auth tuple if your Redmine instance requires it
-            auth = None
-            if hasattr(self.redmine, 'username') and hasattr(self.redmine, 'password'):
-                auth = (self.redmine.username, self.redmine.password)
-
-            # Download the attachment
+            # Create a direct URL to the attachment
             url = f"{self.redmine_url}/attachments/download/{attachment.id}/{attachment.filename}"
-            response = requests.get(url, auth=auth, stream=True)
+
+            # Setup headers for API key authentication
+            headers = {}
+
+            # Add API key to headers if available
+            if self.api_key:
+                headers['X-Redmine-API-Key'] = self.api_key
+
+            # Download the attachment using requests with API key
+            response = requests.get(
+                url,
+                headers=headers,
+                stream=True,
+                verify=True  # Set to False if you have SSL certificate issues
+            )
 
             if response.status_code == 200:
                 # Create temp file with correct extension
@@ -223,11 +281,15 @@ Description:
                 elif os.name == 'posix':  # Linux/Mac
                     subprocess.call(('xdg-open', temp_file.name))
             else:
-                QtWidgets.QMessageBox.warning(self, "Download Failed",
-                                              f"Failed to download attachment: {response.status_code}")
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Download Failed",
+                    f"Failed to download attachment: HTTP {response.status_code}\n{response.text[:200]}"
+                )
         except Exception as e:
             QtWidgets.QMessageBox.warning(self, "Error", f"Error viewing attachment: {str(e)}")
 
+    # Also update the save_attachment method similarly:
     def save_attachment(self, attachment):
         try:
             # Show save dialog
@@ -236,14 +298,23 @@ Description:
             )
 
             if file_path:
-                # Create the auth tuple if your Redmine instance requires it
-                auth = None
-                if hasattr(self.redmine, 'username') and hasattr(self.redmine, 'password'):
-                    auth = (self.redmine.username, self.redmine.password)
+                # Create a direct URL to the attachment
+                url = f"{self.redmine_url}/attachments/download/{attachment.id}/{attachment.filename}"
+
+                # Setup headers for API key authentication
+                headers = {}
+
+                # Try to get API key from redmine object
+                if self.api_key:
+                    headers['X-Redmine-API-Key'] = self.api_key
 
                 # Download the attachment
-                url = f"{self.redmine_url}/attachments/download/{attachment.id}/{attachment.filename}"
-                response = requests.get(url, auth=auth, stream=True)
+                response = requests.get(
+                    url,
+                    headers=headers,
+                    stream=True,
+                    verify=True  # Set to False if you have SSL certificate issues
+                )
 
                 if response.status_code == 200:
                     with open(file_path, 'wb') as f:
@@ -251,8 +322,11 @@ Description:
                             f.write(chunk)
                     QtWidgets.QMessageBox.information(self, "Success", "Attachment saved successfully!")
                 else:
-                    QtWidgets.QMessageBox.warning(self, "Download Failed",
-                                                  f"Failed to download attachment: {response.status_code}")
+                    QtWidgets.QMessageBox.warning(
+                        self,
+                        "Download Failed",
+                        f"Failed to download attachment: HTTP {response.status_code}\n{response.text[:200]}"
+                    )
         except Exception as e:
             QtWidgets.QMessageBox.warning(self, "Error", f"Error saving attachment: {str(e)}")
 

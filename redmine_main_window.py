@@ -212,7 +212,7 @@ class RedmineMainWindow(QtWidgets.QWidget):
         if not self.current_issue:
             QtWidgets.QMessageBox.warning(self, 'No issue', 'No issue is currently selected.')
             return
-        dialog = IssueDetailsDialog(self, self.redmine, self.current_issue, self.font_size, self.redmine_url)
+        dialog = IssueDetailsDialog(self, self.redmine, self.current_issue, self.font_size, self.redmine_url, self.api_key)
         dialog.exec_()
 
     def change_issue_status(self):
