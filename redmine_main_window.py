@@ -99,6 +99,7 @@ class RedmineMainWindow(QtWidgets.QWidget):
 
     def init_ui(self):
         self.setWindowTitle('Redmine Helper')
+        self.setWindowIcon(QtGui.QIcon('icon.ico'))
         self.resize(650, 380)
         self.setMinimumSize(650, 380)
         layout = QtWidgets.QVBoxLayout()
